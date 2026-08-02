@@ -1,0 +1,125 @@
+name: android
+
+on:
+  push:
+    branches:
+      - allthecodes
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-android:
+    name: build-${{ matrix.target }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-linux-android
+          - armv7-linux-androideabi
+          - x86_64-linux-android
+        include:
+          - target: aarch64-linux-android
+            artifact_name: android-arm64
+          - target: armv7-linux-androideabi
+            artifact_name: android-armv7
+          - target: x86_64-linux-android
+            artifact_name: android-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.91.1
+          targets: ${{ matrix.target }}
+
+      - name: Install Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27
+          add-to-path: false
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: android-${{ matrix.target }}-${{ hashFiles(Cargo.lock, Cargo.toml, crates/*/Cargo.toml, rust-toolchain.toml) }}
+          cache-targets: true
+
+      - name: Set up NDK linker
+        shell: bash
+        run: |
+          NDK_HOME="${{ steps.setup-ndk.outputs.ndk-path }}"
+          HOST_TAG="linux-x86_64"
+          TOOLCHAIN_DIR="\${NDK_HOME}/toolchains/llvm/prebuilt/\${HOST_TAG}"
+
+          case "${{ matrix.target }}" in
+            aarch64-linux-android)
+              LINKER="aarch64-linux-android21-clang"
+              AR="llvm-ar"
+              ;;
+            armv7-linux-androideabi)
+              LINKER="armv7a-linux-androideabi21-clang"
+              AR="llvm-ar"
+              ;;
+            x86_64-linux-android)
+              LINKER="x86_64-linux-android21-clang"
+              AR="llvm-ar"
+              ;;
+          esac
+
+          {
+            echo "CARGO_TARGET_$(echo ${{ matrix.target }} | tr [:lower:]- [:upper:]_)_LINKER=\${TOOLCHAIN_DIR}/bin/\${LINKER}"
+            echo "AR_${{ matrix.target }}=\${TOOLCHAIN_DIR}/bin/\${AR}"
+          } >> "$GITHUB_ENV"
+
+          echo "\${TOOLCHAIN_DIR}/bin" >> "$GITHUB_PATH"
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev libcap-dev
+
+      - name: Build for Android
+        run: |
+          cargo build --locked --release --target ${{ matrix.target }} --bin allthecodes
+
+      - name: Strip binary
+        run: |
+          NDK_HOME="${{ steps.setup-ndk.outputs.ndk-path }}"
+          TOOLCHAIN_DIR="\${NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64"
+          case "${{ matrix.target }}" in
+            aarch64-linux-android)
+              \${TOOLCHAIN_DIR}/bin/llvm-strip "target/${{ matrix.target }}/release/allthecodes"
+              ;;
+            armv7-linux-androideabi)
+              \${TOOLCHAIN_DIR}/bin/llvm-strip "target/${{ matrix.target }}/release/allthecodes"
+              ;;
+            x86_64-linux-android)
+              \${TOOLCHAIN_DIR}/bin/llvm-strip "target/${{ matrix.target }}/release/allthecodes"
+              ;;
+          esac
+
+      - name: Stage binary
+        shell: bash
+        run: |
+          dest="dist/allthecodes-android"
+          mkdir -p "$dest"
+          cp "target/${{ matrix.target }}/release/allthecodes" "$dest/allthecodes-${{ matrix.artifact_name }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/
