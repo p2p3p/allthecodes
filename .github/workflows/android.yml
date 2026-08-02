@@ -49,7 +49,7 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          key: android-v2-${{ matrix.target }}-${{ hashFiles('"'"'Cargo.lock'"'"', '"'"'Cargo.toml'"'"', '"'"'rust-toolchain.toml'"'"') }}
+          key: android-v2-${{ matrix.target }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml') }}
           cache-targets: true
 
       - name: Set up NDK cross-compilation environment
@@ -59,18 +59,14 @@ jobs:
           TOOLCHAIN_DIR="${NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64"
           CC_TARGET="${{ matrix.cc_target }}"
 
-          # Add NDK toolchain to PATH
           echo "${TOOLCHAIN_DIR}/bin" >> "$GITHUB_PATH"
 
-          # Set CC and CXX for C dependencies (OpenSSL, etc.)
           echo "CC=${TOOLCHAIN_DIR}/bin/${CC_TARGET}-clang" >> "$GITHUB_ENV"
           echo "CXX=${TOOLCHAIN_DIR}/bin/${CC_TARGET}-clang++" >> "$GITHUB_ENV"
 
-          # Set linker for Rust
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=${TOOLCHAIN_DIR}/bin/${CC_TARGET}-clang" >> "$GITHUB_ENV"
           echo "AR_aarch64-linux-android=${TOOLCHAIN_DIR}/bin/llvm-ar" >> "$GITHUB_ENV"
 
-          # Create missing symlinks for OpenSSL build
           cd "${TOOLCHAIN_DIR}/bin"
           for tool in aarch64-linux-android21-clang aarch64-linux-android21-clang++; do
             base_name="${tool%%21*}"
@@ -85,7 +81,8 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends             pkg-config libcap-dev
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libcap-dev
 
       - name: Build for Android
         run: |
@@ -94,13 +91,15 @@ jobs:
       - name: Strip binary
         run: |
           NDK_HOME="${{ steps.setup-ndk.outputs.ndk-path }}"
-          ${NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip             "target/${{ matrix.target }}/release/allthecodes"
+          ${NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip \
+            "target/${{ matrix.target }}/release/allthecodes"
 
       - name: Stage binary
         shell: bash
         run: |
           mkdir -p dist
-          cp "target/${{ matrix.target }}/release/allthecodes"             "dist/allthecodes-${{ matrix.artifact_name }}"
+          cp "target/${{ matrix.target }}/release/allthecodes" \
+            "dist/allthecodes-${{ matrix.artifact_name }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
