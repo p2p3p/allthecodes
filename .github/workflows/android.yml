@@ -53,7 +53,7 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          key: android-${{ matrix.target }}-${{ hashFiles(Cargo.lock, Cargo.toml, crates/*/Cargo.toml, rust-toolchain.toml) }}
+          key: android-${{ matrix.target }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/*/Cargo.toml', 'rust-toolchain.toml') }}
           cache-targets: true
 
       - name: Set up NDK linker
