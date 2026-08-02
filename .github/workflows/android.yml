@@ -25,7 +25,7 @@ jobs:
         include:
           - target: aarch64-linux-android
             artifact_name: android-arm64
-            cc_target: aarch64-linux-android21
+            cc_target: aarch64-linux-android26
             arch: arm64
 
     steps:
@@ -65,10 +65,11 @@ jobs:
           echo "CXX=${TOOLCHAIN_DIR}/bin/${CC_TARGET}-clang++" >> "$GITHUB_ENV"
 
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=${TOOLCHAIN_DIR}/bin/${CC_TARGET}-clang" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS=-C link-args=-lutil" >> "$GITHUB_ENV"
           echo "AR_aarch64-linux-android=${TOOLCHAIN_DIR}/bin/llvm-ar" >> "$GITHUB_ENV"
 
           cd "${TOOLCHAIN_DIR}/bin"
-          for tool in aarch64-linux-android21-clang aarch64-linux-android21-clang++; do
+          for tool in aarch64-linux-android26-clang aarch64-linux-android26-clang++; do
             base_name="${tool%%21*}"
             if [ ! -f "${base_name}clang" ] && [ -f "$tool" ]; then
               ln -sf "$tool" "${base_name}clang"
