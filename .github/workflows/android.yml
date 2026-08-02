@@ -16,21 +16,17 @@ jobs:
   build-android:
     name: build-${{ matrix.target }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         target:
           - aarch64-linux-android
-          - armv7-linux-androideabi
-          - x86_64-linux-android
         include:
           - target: aarch64-linux-android
             artifact_name: android-arm64
-          - target: armv7-linux-androideabi
-            artifact_name: android-armv7
-          - target: x86_64-linux-android
-            artifact_name: android-x86_64
+            cc_target: aarch64-linux-android21
+            arch: arm64
 
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +36,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.91.1
+          toolchain: 1.81.0
           targets: ${{ matrix.target }}
 
       - name: Install Android NDK
@@ -53,43 +49,43 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          key: android-${{ matrix.target }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/*/Cargo.toml', 'rust-toolchain.toml') }}
+          key: android-v2-${{ matrix.target }}-${{ hashFiles('"'"'Cargo.lock'"'"', '"'"'Cargo.toml'"'"', '"'"'rust-toolchain.toml'"'"') }}
           cache-targets: true
 
-      - name: Set up NDK linker
+      - name: Set up NDK cross-compilation environment
         shell: bash
         run: |
           NDK_HOME="${{ steps.setup-ndk.outputs.ndk-path }}"
-          HOST_TAG="linux-x86_64"
-          TOOLCHAIN_DIR="\${NDK_HOME}/toolchains/llvm/prebuilt/\${HOST_TAG}"
+          TOOLCHAIN_DIR="${NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64"
+          CC_TARGET="${{ matrix.cc_target }}"
 
-          case "${{ matrix.target }}" in
-            aarch64-linux-android)
-              LINKER="aarch64-linux-android21-clang"
-              AR="llvm-ar"
-              ;;
-            armv7-linux-androideabi)
-              LINKER="armv7a-linux-androideabi21-clang"
-              AR="llvm-ar"
-              ;;
-            x86_64-linux-android)
-              LINKER="x86_64-linux-android21-clang"
-              AR="llvm-ar"
-              ;;
-          esac
+          # Add NDK toolchain to PATH
+          echo "${TOOLCHAIN_DIR}/bin" >> "$GITHUB_PATH"
 
-          {
-            echo "CARGO_TARGET_$(echo ${{ matrix.target }} | tr [:lower:]- [:upper:]_)_LINKER=\${TOOLCHAIN_DIR}/bin/\${LINKER}"
-            echo "AR_${{ matrix.target }}=\${TOOLCHAIN_DIR}/bin/\${AR}"
-          } >> "$GITHUB_ENV"
+          # Set CC and CXX for C dependencies (OpenSSL, etc.)
+          echo "CC=${TOOLCHAIN_DIR}/bin/${CC_TARGET}-clang" >> "$GITHUB_ENV"
+          echo "CXX=${TOOLCHAIN_DIR}/bin/${CC_TARGET}-clang++" >> "$GITHUB_ENV"
 
-          echo "\${TOOLCHAIN_DIR}/bin" >> "$GITHUB_PATH"
+          # Set linker for Rust
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=${TOOLCHAIN_DIR}/bin/${CC_TARGET}-clang" >> "$GITHUB_ENV"
+          echo "AR_aarch64-linux-android=${TOOLCHAIN_DIR}/bin/llvm-ar" >> "$GITHUB_ENV"
+
+          # Create missing symlinks for OpenSSL build
+          cd "${TOOLCHAIN_DIR}/bin"
+          for tool in aarch64-linux-android21-clang aarch64-linux-android21-clang++; do
+            base_name="${tool%%21*}"
+            if [ ! -f "${base_name}clang" ] && [ -f "$tool" ]; then
+              ln -sf "$tool" "${base_name}clang"
+            fi
+            if [ ! -f "${base_name}clang++" ] && [ -f "${tool}++" ]; then
+              ln -sf "${tool}++" "${base_name}clang++"
+            fi
+          done
 
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends \
-            pkg-config libssl-dev libcap-dev
+          sudo apt-get install -y --no-install-recommends             pkg-config libcap-dev
 
       - name: Build for Android
         run: |
@@ -98,25 +94,13 @@ jobs:
       - name: Strip binary
         run: |
           NDK_HOME="${{ steps.setup-ndk.outputs.ndk-path }}"
-          TOOLCHAIN_DIR="\${NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64"
-          case "${{ matrix.target }}" in
-            aarch64-linux-android)
-              \${TOOLCHAIN_DIR}/bin/llvm-strip "target/${{ matrix.target }}/release/allthecodes"
-              ;;
-            armv7-linux-androideabi)
-              \${TOOLCHAIN_DIR}/bin/llvm-strip "target/${{ matrix.target }}/release/allthecodes"
-              ;;
-            x86_64-linux-android)
-              \${TOOLCHAIN_DIR}/bin/llvm-strip "target/${{ matrix.target }}/release/allthecodes"
-              ;;
-          esac
+          ${NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip             "target/${{ matrix.target }}/release/allthecodes"
 
       - name: Stage binary
         shell: bash
         run: |
-          dest="dist/allthecodes-android"
-          mkdir -p "$dest"
-          cp "target/${{ matrix.target }}/release/allthecodes" "$dest/allthecodes-${{ matrix.artifact_name }}"
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/allthecodes"             "dist/allthecodes-${{ matrix.artifact_name }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
